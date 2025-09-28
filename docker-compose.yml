@@ -4,14 +4,13 @@ services:
   postgres:
     image: postgres:14
     restart: always
-    environment:
-      POSTGRES_USER: \${POSTGRES_USER}
-      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
-      POSTGRES_DB: \${POSTGRES_DB}
+    env_file:
+      - .devcontainer/credentials.env
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \${POSTGRES_USER} -d \${POSTGRES_DB}"]
+      # Let the container shell expand $POSTGRES_USER/$POSTGRES_DB
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -21,16 +20,13 @@ services:
     restart: always
     ports:
       - "5678:5678"
+    env_file:
+      - .devcontainer/credentials.env
     environment:
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_HOST=postgres
       - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=\${POSTGRES_DB}
-      - DB_POSTGRESDB_USER=\${POSTGRES_USER}
-      - DB_POSTGRESDB_PASSWORD=\${POSTGRES_PASSWORD}
       - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=\${N8N_USER}
-      - N8N_BASIC_AUTH_PASSWORD=\${N8N_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy
