@@ -1,0 +1,19 @@
+{
+  "name": "codespace with docker and n8n",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "moby": true,
+      "version": "latest",
+      "dockerDashComposeVersion": "v2"
+    }
+  },
+  "runArgs": ["--privileged"],
+  "customizations": {
+    "vscode": { "extensions": ["ms-azuretools.vscode-docker"] }
+  },
+  "forwardPorts": [
+    { "port": 5678, "label": "n8n", "onAutoForward": "openBrowser" }
+  ],
+  "postCreateCommand": ".devcontainer/postCreate.sh"
+}
