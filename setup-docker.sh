@@ -1,11 +1,23 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Step 1: Create devcontainer config folder
+# small helper to ensure tools exist
+need() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Installing $1 ..."
+    sudo apt-get update -y
+    sudo apt-get install -y "$1"
+  fi
+}
+
+# make sure core tools exist
+need openssl
+need curl
+
 mkdir -p .devcontainer
 
-# Step 2: Write devcontainer.json
-cat > .devcontainer/devcontainer.json <<'EOF'
+# devcontainer.json with auto open on port 5678 and a postCreate script
+cat > .devcontainer/devcontainer.json <<'JSON'
 {
   "name": "codespace with docker and n8n",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
@@ -31,114 +43,107 @@ cat > .devcontainer/devcontainer.json <<'EOF'
   ],
   "postCreateCommand": ".devcontainer/postCreate.sh"
 }
-EOF
+JSON
 
-# Step 3: Write postCreate.sh
-cat > .devcontainer/postCreate.sh <<'EOF'
-#!/bin/bash
-set -e
+# postCreate.sh
+cat > .devcontainer/postCreate.sh <<'BASH'
+#!/usr/bin/env bash
+set -euo pipefail
 
-# --- CONFIGURE EMAIL SETTINGS IF YOU WANT EMAIL NOTIFICATIONS ---
+# optional email settings, fill in to enable email
 EMAIL_FROM="youremail@gmail.com"
 EMAIL_TO="youremail@gmail.com"
 SMTP_SERVER="smtp.gmail.com"
 SMTP_PORT=587
 SMTP_USER="youremail@gmail.com"
-SMTP_PASS="your_app_password"
-# ---------------------------------------------------------------
+SMTP_PASS="your_app_password"   # use a Gmail App Password if you enable this
 
-# Step 1: Generate rotating n8n creds, fixed Postgres creds
-N8N_USER=admin
-N8N_PASSWORD=$(openssl rand -hex 12)
+# rotating n8n credentials on every rebuild
+N8N_USER="admin"
+N8N_PASSWORD="$(openssl rand -hex 12)"
 
-POSTGRES_USER=n8n
-POSTGRES_PASSWORD=n8n
-POSTGRES_DB=n8n
+# fixed Postgres credentials for persistence
+POSTGRES_USER="n8n"
+POSTGRES_PASSWORD="n8n"
+POSTGRES_DB="n8n"
 
-# Save creds for docker-compose
-cat > "$(dirname "$0")/credentials.env" <<EOF2
+# write env for docker compose
+cat > "$(dirname "$0")/credentials.env" <<ENV
 N8N_USER=$N8N_USER
 N8N_PASSWORD=$N8N_PASSWORD
 POSTGRES_USER=$POSTGRES_USER
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 POSTGRES_DB=$POSTGRES_DB
-EOF2
+ENV
 
-# Step 2: Restart n8n with new creds, keep Postgres data persistent
+# restart only n8n so Postgres data stays
 docker compose down n8n || true
 docker compose up -d
 
-echo ""
-echo "📦 Checking container health..."
+echo
+echo "Checking container health ..."
 
-# Step 3: Health check loop
 for cid in $(docker ps -q); do
-  name=$(docker inspect --format='{{.Name}}' $cid | sed 's/^\/\?//')
-  status=$(docker inspect --format='{{.State.Health.Status}}' $cid 2>/dev/null || echo "unknown")
-
+  name="$(docker inspect --format='{{.Name}}' "$cid" | sed 's#^/##')"
+  status="$(docker inspect --format='{{.State.Health.Status}}' "$cid" 2>/dev/null || echo "unknown")"
   case "$status" in
     healthy) icon="✅" ;;
     unhealthy) icon="❌" ;;
     starting) icon="⏳" ;;
     *) icon="❓" ;;
   esac
-
-  ports=$(docker inspect --format='{{range $p, $conf := .NetworkSettings.Ports}}{{if $conf}}{{$p}} -> {{$conf 0).HostPort}}{{end}} {{end}}' $cid 2>/dev/null)
-
-  echo "   $icon $name  (status: $status)  ports: ${ports:-none}"
+  ports="$(docker inspect --format='{{range $p,$conf := .NetworkSettings.Ports}}{{if $conf}}{{$p}} -> {{$conf 0).HostPort}}{{end}} {{end}}' "$cid" 2>/dev/null)"
+  echo "   $icon $name  status: $status  ports: ${ports:-none}"
 done
 
-# Step 4: Build clickable login URL
 LOGIN_URL="http://${N8N_USER}:${N8N_PASSWORD}@localhost:5678"
 
-echo ""
-echo "🚀 n8n is running!"
-echo "👉 Auto-forwarded on port 5678 (browser should open automatically)."
-echo "👤 User: $N8N_USER"
-echo "🔑 Password: $N8N_PASSWORD"
-echo "🔗 One-click login: $LOGIN_URL"
-echo ""
-echo "🗄️ Postgres credentials (fixed for persistence):"
-echo "   User: $POSTGRES_USER"
-echo "   Pass: $POSTGRES_PASSWORD"
-echo "   DB:   $POSTGRES_DB"
-echo ""
+echo
+echo "n8n is running"
+echo "Port 5678 is auto forwarded"
+echo "User: $N8N_USER"
+echo "Password: $N8N_PASSWORD"
+echo "One click login: $LOGIN_URL"
+echo
+echo "Postgres is persistent"
+echo "DB user: $POSTGRES_USER"
+echo "DB pass: $POSTGRES_PASSWORD"
+echo "DB name: $POSTGRES_DB"
+echo
 
-# Step 5: Optional email notification
+# optional email notification
 if [ -n "$SMTP_PASS" ] && [ "$EMAIL_TO" != "youremail@gmail.com" ]; then
-  echo "Sending credentials email to $EMAIL_TO..."
-  EMAIL_SUBJECT="n8n Codespace Credentials"
-  EMAIL_BODY=$(cat <<EOM
-🚀 Your n8n Codespace is running!
+  echo "Sending credentials email to $EMAIL_TO ..."
+  SUBJECT="n8n Codespace credentials"
+  BODY=$(cat <<EOM
+Your n8n Codespace is running
 
-Login here:
+Login
 $LOGIN_URL
 
-Credentials:
-  User: $N8N_USER
-  Pass: $N8N_PASSWORD
+n8n
+  user: $N8N_USER
+  pass: $N8N_PASSWORD
 
-Postgres (persistent):
-  User: $POSTGRES_USER
-  Pass: $POSTGRES_PASSWORD
-  DB:   $POSTGRES_DB
+Postgres
+  user: $POSTGRES_USER
+  pass: $POSTGRES_PASSWORD
+  db:   $POSTGRES_DB
 EOM
 )
-
   curl -s --url "smtp://$SMTP_SERVER:$SMTP_PORT" \
     --ssl-reqd \
     --mail-from "$EMAIL_FROM" \
     --mail-rcpt "$EMAIL_TO" \
     --user "$SMTP_USER:$SMTP_PASS" \
-    -T <(echo -e "From: $EMAIL_FROM\nTo: $EMAIL_TO\nSubject: $EMAIL_SUBJECT\n\n$EMAIL_BODY")
-
-  echo "📧 Email sent!"
+    -T <(printf "From: %s\nTo: %s\nSubject: %s\n\n%s" "$EMAIL_FROM" "$EMAIL_TO" "$SUBJECT" "$BODY") >/dev/null || true
+  echo "Email sent"
 fi
-EOF
+BASH
 chmod +x .devcontainer/postCreate.sh
 
-# Step 4: Write docker-compose.yml
-cat > docker-compose.yml <<'EOF'
+# docker compose file with health checks and persistent volumes
+cat > docker-compose.yml <<'YAML'
 version: "3.8"
 
 services:
@@ -186,7 +191,7 @@ services:
 volumes:
   postgres_data:
   n8n_data:
-EOF
+YAML
 
-echo "✅ Setup script finished."
-echo "👉 Commit these files, then run: Codespaces: Rebuild Container"
+echo "Setup files written"
+echo "Add and commit, then rebuild the container"
