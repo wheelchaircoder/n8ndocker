@@ -10,10 +10,16 @@
   },
   "runArgs": ["--privileged"],
   "customizations": {
-    "vscode": { "extensions": ["ms-azuretools.vscode-docker"] }
+    "vscode": {
+      "extensions": ["ms-azuretools.vscode-docker"]
+    }
   },
-  "forwardPorts": [
-    { "port": 5678, "label": "n8n", "onAutoForward": "openBrowser" }
-  ],
+  "forwardPorts": [5678],
+  "portsAttributes": {
+    "5678": {
+      "label": "n8n",
+      "onAutoForward": "openBrowser"
+    }
+  },
   "postCreateCommand": ".devcontainer/postCreate.sh"
 }
